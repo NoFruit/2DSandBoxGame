@@ -15,3 +15,4 @@ MonoBehaviour:
   tileName: SnowGrass
   tileSprites:
   - {fileID: 21300000, guid: ac1ec66fc43065249bb74be2fabccf7b, type: 3}
+  isBackground: 1

@@ -4,6 +4,9 @@ using UnityEngine;
 
 public class TerrianGeneration : MonoBehaviour
 {
+    public PlayerController player;
+    public CamController cam;
+
     /*
      * 方块纹理素材
      */
@@ -17,51 +20,6 @@ public class TerrianGeneration : MonoBehaviour
     public BiomeClass[] biomes;
 
 
-
-    /*
-     * [Trees]树木部分
-     * treeChance: 树木出现概率，概率是自身倒数;
-     * minTreeHeight: 最小树高；
-     * maxTreeHeight: 最大树高；
-     * 
-     *  [Header("Biomes")]生物群系
-     *  public Color grassland;
-     *  public Color desert;
-     *  public Color snow;
-     *  public Color forest;
-     *  颜色代表不同生物群系
-     *  public Texture2D biomeMap: 生物群系噪声纹理；
-     * 
-     * [Generation Settings]
-     * chunkSize: 区块大小；
-     * worldSize: 地图大小；
-     * generateCaves: 测试地形是否生成正确，排除洞穴干扰；
-     * dirtLayerHight: 土层高度；
-     * surfaceValue: 地形出现的阈值，关乎地形复杂度，有方块区域面积；
-     * heightMultiplier: 地形高度缩放系数，地形的乘数；
-     * heightAddition: 地形高度基础增量，地形的加数；
-     * 
-     * [Noise Settings]随机噪声部分
-     * terrainFreq: 地形凹凸程度；
-     * caveFreq: 洞穴出现概率，分布面积，低代表单个大，频率高；
-     * seed: 随机数，随机种子；
-     * noiseTexture: 噪声纹理；
-     * 
-     * [Ore Settings]矿石部分
-     * 一个矿石类的列表
-     * 
-     * worldChunks：维护区块列表
-     * worldTiles: 记录地图某坐标是否有方块；
-     */
-
-    //[Header("Trees")]
-    //public int treeChance = 15;
-    //public int minTreeHeight = 5;
-    //public int maxTreeHeight = 9;
-
-    //[Header("Addons")]
-    //public int tallGrassChance = 10;
-
     [Header("Biomes")]
     public float biomeFreq;
     public Gradient biomeGradient;
@@ -71,79 +29,104 @@ public class TerrianGeneration : MonoBehaviour
     public int chunkSize = 16;
     public int worldSize = 100;
     public bool generateCaves = true;
-    // public int dirtLayerHight = 5;
-    // public float surfaceValue = 0.25f;
-    // public float heightMultiplier = 20f;
     public int heightAddition = 25;
 
     [Header("Noise Settings")]
-    // public float terrainFreq = 0.05f;
-    public float caveFreq = 0.05f;
     public Texture2D caveNoiseTexture;
+    public float terrainFreq = 0.05f;
+    public float caveFreq = 0.05f;
 
     [Header("Ore Settings")]
     public OreClass[] ores;
 
     private GameObject[] worldChunks;
-    private List<Vector2> worldTiles = new List<Vector2>();
+
+    public List<Vector2> worldTiles = new List<Vector2>();
+    public List<GameObject> worldTilesObjects = new List<GameObject>();
+
     private BiomeClass curBiome;
+    private Color[] biomeCols;
 
 
     private void Start()
     {
+        // 随机种子生成
+        seed = Random.Range(-10000, 10000);
+
         for (int i = 0; i < ores.Length; i++)
         {
             ores[i].spreadTexture = new Texture2D(worldSize, worldSize);
         }
 
-        // 随机种子生成
-        seed = Random.Range(-10000, 10000);
+        biomeCols = new Color[biomes.Length];
+
+        for (int i = 0; i < biomes.Length; i++)
+        {
+            biomeCols[i] = biomes[i].biomeCol;
+        }
 
         // TODO 由于铁和煤类似的噪声分布，把随机算法变得复杂一些或者为它们生成特定的种子
-
+        DrawBiomeMap();
         DrawTextures();
         DrawCavesAndOres();
 
         // 创建地形
         CreateChunks();
         GenerateTerrain();
+
+        cam.worldSize = worldSize;
+        cam.Spawn(new Vector3(player.spawnPos.x, player.spawnPos.y, cam.transform.position.z));
+        player.Spawn();
+    }
+
+    public void DrawBiomeMap()
+    {
+        float b;
+        Color col;
+        biomeMap = new Texture2D(worldSize, worldSize);
+
+        for(int x = 0; x < biomeMap.width; x++)
+        {
+            for (int y = 0; y < biomeMap.height; y++)
+            {
+                b = Mathf.PerlinNoise((x + seed) * biomeFreq, (y + seed) * biomeFreq);
+                col = biomeGradient.Evaluate(b);
+                biomeMap.SetPixel(x, y, col);
+            }
+        }
+
+        biomeMap.Apply();
     }
 
     public void DrawCavesAndOres()
     {
         caveNoiseTexture = new Texture2D(worldSize, worldSize);
+        float v;
+        float o;
 
         for (int x = 0; x < worldSize; x++)
         {
             for (int y = 0; y < worldSize; y++)
             {
                 curBiome = GetCurrentBiome(x, y);
-                float v = Mathf.PerlinNoise((x + seed) * curBiome.caveFreq, (y + seed) * curBiome.caveFreq);
+                v = Mathf.PerlinNoise((x + seed) * caveFreq, (y + seed) * caveFreq);
                 if (v > curBiome.surfaceValue)
                     caveNoiseTexture.SetPixel(x, y, Color.white);
                 else
                     caveNoiseTexture.SetPixel(x, y, Color.black);
-            }
-        }
 
-        caveNoiseTexture.Apply();
-
-        for (int x = 0; x < worldSize; x++)
-        {
-            for (int y = 0; y < worldSize; y++)
-            {
-                curBiome = GetCurrentBiome(x, y);
                 for (int i = 0; i < ores.Length; i++)
                 {
                     ores[i].spreadTexture.SetPixel(x, y, Color.black);
 
-                    float v = Mathf.PerlinNoise((x + seed) * curBiome.ores[i].frequency, (y + seed) * curBiome.ores[i].frequency);
-                    if (v > curBiome.ores[i].size)
+                    o = Mathf.PerlinNoise((x + seed) * curBiome.ores[i].frequency, (y + seed) * curBiome.ores[i].frequency);
+                    if (o > curBiome.ores[i].size)
                         ores[i].spreadTexture.SetPixel(x, y, Color.white);
                 }
             }
-
         }
+
+        caveNoiseTexture.Apply();
 
         foreach (var ore in ores)
         {
@@ -153,39 +136,16 @@ public class TerrianGeneration : MonoBehaviour
 
     public void DrawTextures()
     {
-        // 生物群系纹理生成
-        biomeMap = new Texture2D(worldSize, worldSize);
-        DrawBiomeTexture();
-
         for (int i = 0; i < biomes.Length; i++)
         {
-
-            // 洞穴纹理生成
-            GenerateNoiseTexture(biomes[i].caveFreq, biomes[i].surfaceValue, ref biomes[i].caveNoiseTexture);
-
-            // 矿物纹理生成
+            biomes[i].caveNoiseTexture = new Texture2D(worldSize, worldSize);
             for (int o = 0; o < biomes[i].ores.Length; o++)
             {
-                GenerateNoiseTexture(biomes[i].ores[o].frequency, biomes[i].ores[o].size, ref biomes[i].ores[o].spreadTexture);
+                biomes[i].ores[o].spreadTexture = new Texture2D(worldSize, worldSize);
+                GenerateNoiseTextures(biomes[i].ores[o].frequency, biomes[i].ores[o].size, ref biomes[i].ores[o].spreadTexture);
+
             }
         }
-    }
-
-    public void DrawBiomeTexture()
-    {
-        for (int x = 0; x < biomeMap.width; x++)
-        {
-            for (int y = 0; y < biomeMap.height; y++)
-            {
-                // 在颜色部分使用梯度来表示颜色
-                float v = Mathf.PerlinNoise((x + seed) * biomeFreq, (y + seed) * biomeFreq);
-                Color col = biomeGradient.Evaluate(v);
-                biomeMap.SetPixel(x, y, col);
-               
-            }
-        }
-
-        biomeMap.Apply();
     }
 
     private void CreateChunks()
@@ -207,13 +167,15 @@ public class TerrianGeneration : MonoBehaviour
     {
         // 改变curBiome的值
 
-        for (int i = 0; i < biomes.Length; i++)
-        {
-            if (biomes[i].biomeCol == biomeMap.GetPixel(x, y))
-            {
-                return biomes[i];
-            }
-        }
+        //for (int i = 0; i < biomes.Length; i++)
+        //{
+        //    if (biomes[i].biomeCol == biomeMap.GetPixel(x, y))
+        //    {
+        //        return biomes[i];
+        //    }
+        //}
+        if (System.Array.IndexOf(biomeCols, biomeMap.GetPixel(x, y)) >= 0)
+            return biomes[System.Array.IndexOf(biomeCols, biomeMap.GetPixel(x, y))];
 
         return curBiome;
     }
@@ -224,11 +186,10 @@ public class TerrianGeneration : MonoBehaviour
         Sprite[] tileSprites;
         for(int x = 0; x < worldSize; x++)
         {
-            curBiome = GetCurrentBiome(x, 0);
             // 在当前的x坐标计算地形高度，Perlin噪声可以在不同循环保持高度值平滑 
-            float height = Mathf.PerlinNoise((x + seed) * curBiome.terrainFreq, seed * curBiome.terrainFreq) * curBiome.heightMultiplier + heightAddition;
+            float height;
 
-            for(int y = 0; y < height; y++)
+            for(int y = 0; y < worldSize; y++)
             {
                 /* 根据当前高度改变地形方块
                  * 地形的每一列：
@@ -240,7 +201,14 @@ public class TerrianGeneration : MonoBehaviour
                  * 根据不同的生物群系随机，选择对应的方块集
                  */
                 // 根据生物群系颜色
+                height = Mathf.PerlinNoise((x + seed) * terrainFreq, seed * terrainFreq) * curBiome.heightMultiplier + heightAddition;
+
+                if (x == worldSize / 2)
+                    player.spawnPos = new Vector2(x, height + 2);
+
                 curBiome = GetCurrentBiome(x, y);
+
+                if (y >= height) { break; }
 
                 if (y < height - curBiome.dirtLayerHight)
                 {
@@ -270,12 +238,12 @@ public class TerrianGeneration : MonoBehaviour
                 {
                     if (caveNoiseTexture.GetPixel(x, y).r > 0.5f)
                     {
-                        PlaceTile(tileSprites, x, y);
+                        PlaceTile(tileSprites, x, y, false);
                     }
                 }
                 else
                 {
-                    PlaceTile(tileSprites, x, y);
+                    PlaceTile(tileSprites, x, y, false);
                 }
 
                 // 生成到达地面表层后
@@ -290,8 +258,15 @@ public class TerrianGeneration : MonoBehaviour
                         // 在当前有方块为支撑底部的地方
                         if (worldTiles.Contains(new Vector2(x, y)))
                         {
-                            // 生成树
-                            GenerateTree(Random.Range(curBiome.minTreeHeight, curBiome.maxTreeHeight), x, y + 1);
+                            if (curBiome.name == "Desert")
+                            {
+                                GenerateCactus(curBiome.tileAtlas, Random.Range(curBiome.minTreeHeight, curBiome.maxTreeHeight), x, y + 1);
+                            }
+                            else
+                            {
+                                // 生成树
+                                GenerateTree(Random.Range(curBiome.minTreeHeight, curBiome.maxTreeHeight), x, y + 1);
+                            }
                         }
                     }
                     else
@@ -305,7 +280,7 @@ public class TerrianGeneration : MonoBehaviour
                             {
                                 if (curBiome.tileAtlas.tallGrass != null)
                                 {
-                                    PlaceTile(curBiome.tileAtlas.tallGrass.tileSprites, x, y + 1);
+                                    PlaceTile(curBiome.tileAtlas.tallGrass.tileSprites, x, y + 1, true);
                                 }
                             }
                         }
@@ -326,8 +301,9 @@ public class TerrianGeneration : MonoBehaviour
      * 对于任何超过表面值的噪声像素，将其设置为纯白
      * 纹理中纯白部分是地形会生成的位置
      */
-    private void GenerateNoiseTexture(float frequency, float limit, ref Texture2D noiseTexture)
+    private void GenerateNoiseTextures(float frequency, float limit, ref Texture2D noiseTexture)
     {
+        float v;
         noiseTexture = new Texture2D(worldSize, worldSize);
 
         for(int x = 0; x < noiseTexture.width; x++)
@@ -335,7 +311,8 @@ public class TerrianGeneration : MonoBehaviour
             for(int y = 0; y < noiseTexture.height; y++)
             {
                 // create a 2D texture
-                float v = Mathf.PerlinNoise((x + seed) * frequency, (y + seed) * frequency);
+                v = Mathf.PerlinNoise((x + seed) * frequency, (y + seed) * frequency);
+
                 if (v > limit)
                     noiseTexture.SetPixel(x, y, Color.white);
                 else
@@ -357,21 +334,29 @@ public class TerrianGeneration : MonoBehaviour
         // 把树做成树样
         for (int i = 0; i < treeHeight; i++)
         {
-            PlaceTile(tileAtlas.log.tileSprites, x, y + i);
+            PlaceTile(tileAtlas.log.tileSprites, x, y + i, true);
         }
 
         // 添加叶子
-        PlaceTile(tileAtlas.leaf.tileSprites, x, y + treeHeight);
-        PlaceTile(tileAtlas.leaf.tileSprites, x, y + treeHeight + 1);
-        PlaceTile(tileAtlas.leaf.tileSprites, x, y + treeHeight + 2);
+        PlaceTile(tileAtlas.leaf.tileSprites, x, y + treeHeight, true);
+        PlaceTile(tileAtlas.leaf.tileSprites, x, y + treeHeight + 1, true);
+        PlaceTile(tileAtlas.leaf.tileSprites, x, y + treeHeight + 2, true);
 
-        PlaceTile(tileAtlas.leaf.tileSprites, x - 1, y + treeHeight);
-        PlaceTile(tileAtlas.leaf.tileSprites, x - 1, y + treeHeight + 1);
+        PlaceTile(tileAtlas.leaf.tileSprites, x - 1, y + treeHeight, true);
+        PlaceTile(tileAtlas.leaf.tileSprites, x - 1, y + treeHeight + 1, true);
 
-        PlaceTile(tileAtlas.leaf.tileSprites, x + 1, y + treeHeight);
-        PlaceTile(tileAtlas.leaf.tileSprites, x + 1, y + treeHeight + 1);
+        PlaceTile(tileAtlas.leaf.tileSprites, x + 1, y + treeHeight, true);
+        PlaceTile(tileAtlas.leaf.tileSprites, x + 1, y + treeHeight + 1, true);
 
         // TODO 根据树叶子大小生成不同大小的形状
+    }
+
+    public void GenerateCactus(TileAtlas atlas, int treeHeight, int x, int y)
+    {
+        for (int i = 0; i < treeHeight; i++)
+        {
+            PlaceTile(atlas.log.tileSprites, x, y + i, true);
+        }
     }
 
     /*
@@ -382,9 +367,9 @@ public class TerrianGeneration : MonoBehaviour
      * 在特定位置生成对应的方块，并把方块放入合适的区块中
      * 并在列表中记录方块坐标，记录该位置有方块
      */
-    public void PlaceTile(Sprite[] tileSprites, int x, int y)
+    public void PlaceTile(Sprite[] tileSprites, int x, int y, bool backgroundElement)
     {
-        if (!worldTiles.Contains(new Vector2Int(x, y)))
+        if (!worldTiles.Contains(new Vector2Int(x, y)) && x >= 0 && x <= worldSize && y >= 0 && y <= worldSize)
         {
             GameObject newTile = new GameObject();
 
@@ -395,14 +380,31 @@ public class TerrianGeneration : MonoBehaviour
             newTile.transform.parent = worldChunks[chunkCoord].transform;  // 添加为对应区块的子对象
 
             newTile.AddComponent<SpriteRenderer>(); // 添加Sprite Renderer
+            if (!backgroundElement)
+            {
+                newTile.AddComponent<BoxCollider2D>();
+                newTile.GetComponent<BoxCollider2D>().size = Vector2.one;
+                newTile.tag = "Ground";
+            }
 
             int spriteIndex = Random.Range(0, tileSprites.Length);
             newTile.GetComponent<SpriteRenderer>().sprite = tileSprites[spriteIndex];   // 组件增加sprite
+            newTile.GetComponent<SpriteRenderer>().sortingOrder = -5;
 
             newTile.name = tileSprites[0].name;
             newTile.transform.position = new Vector2(x + 0.5f, y + 0.5f);
 
             worldTiles.Add(newTile.transform.position - (Vector3.one * 0.5f));
+            worldTilesObjects.Add(newTile);
         }
     }
+
+    public void RemoveTile(int x, int y)
+    {
+        if (worldTiles.Contains(new Vector2Int(x, y)) && x >= 0 && x <= worldSize && y >= 0 && y <= worldSize)
+        {
+            Destroy(worldTilesObjects[worldTiles.IndexOf(new Vector2(x, y))]);
+        }
+    }
+
 }

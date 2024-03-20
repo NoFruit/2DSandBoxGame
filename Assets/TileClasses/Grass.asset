@@ -15,3 +15,4 @@ MonoBehaviour:
   tileName: Grass
   tileSprites:
   - {fileID: 21300000, guid: 7922c3546a05c17498bc717406ee7dde, type: 3}
+  isBackground: 1
