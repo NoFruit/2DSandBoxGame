@@ -4,18 +4,19 @@ MonoImporter:
   externalObjects: {}
   serializedVersion: 2
   defaultReferences:
-  - grass: {instanceID: 0}
-  - dirt: {instanceID: 0}
-  - stone: {instanceID: 0}
-  - log: {instanceID: 0}
-  - leaf: {instanceID: 0}
-  - snow: {instanceID: 0}
-  - sand: {instanceID: 0}
-  - tallGrass: {instanceID: 0}
-  - coal: {instanceID: 0}
-  - iron: {instanceID: 0}
-  - gold: {instanceID: 0}
-  - diamond: {instanceID: 0}
+  - grass: {fileID: 11400000, guid: 0dfec916dd575174ca18cfbba526e367, type: 2}
+  - dirt: {fileID: 11400000, guid: 92830feecddddc94683adcf19ff2912b, type: 2}
+  - stone: {fileID: 11400000, guid: 0cb686a6deae81143a16e18296ff76cf, type: 2}
+  - stone_wall: {fileID: 11400000, guid: 8012f21c5879ee34a84f4e659c2a8983, type: 2}
+  - log: {fileID: 11400000, guid: 6994f74d7c9349347935ec52856b7333, type: 2}
+  - leaf: {fileID: 11400000, guid: 081a477ec4dafcb4ebce3da3d1b4c1b8, type: 2}
+  - snow: {fileID: 11400000, guid: d0561cdb46d6d2c44b0dc42d6ffd20e8, type: 2}
+  - sand: {fileID: 11400000, guid: f37456ef72ae95f49a1735e10e9e7c29, type: 2}
+  - tallGrass: {fileID: 11400000, guid: 5ced6fc187d37294997d47cf4906dd58, type: 2}
+  - coal: {fileID: 11400000, guid: 78b03a4cd65ebd546923c8dfc56ccd4e, type: 2}
+  - iron: {fileID: 11400000, guid: 962be206a76f7e4469ce6579d37e4ed5, type: 2}
+  - gold: {fileID: 11400000, guid: fcfe5b6fede952f43acdb7b3ae1c851a, type: 2}
+  - diamond: {fileID: 11400000, guid: f0d57edfed66c57459f011ced33a32a5, type: 2}
   executionOrder: 0
   icon: {instanceID: 0}
   userData: 

@@ -340,12 +340,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9b1fd198b002fb94caa7a6951d376218, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  selectedTile: {fileID: 11400000, guid: 0cb686a6deae81143a16e18296ff76cf, type: 2}
+  playerRange: 5
   mousePos: {x: 0, y: 0}
   moveSpeed: 5
   jumpForce: 12
   onGround: 0
   horizontal: 0
   hit: 0
+  place: 0
   spawnPos: {x: 0, y: 0}
   terrianGenerator: {fileID: 0}
 --- !u!1 &4270728621730575031

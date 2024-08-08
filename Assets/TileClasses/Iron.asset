@@ -13,6 +13,9 @@ MonoBehaviour:
   m_Name: Iron
   m_EditorClassIdentifier: 
   tileName: Iron
+  wallVariant: {fileID: 11400000, guid: 8012f21c5879ee34a84f4e659c2a8983, type: 2}
   tileSprites:
   - {fileID: 21300000, guid: 231cc77bb7f90be4eaa1d34598ca100b, type: 3}
   - {fileID: 21300000, guid: b2a8bdd385b7b7c4797d10e1bde496fd, type: 3}
+  isBackground: 0
+  tileDrop: 1

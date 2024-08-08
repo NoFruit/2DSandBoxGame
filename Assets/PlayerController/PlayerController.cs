@@ -3,6 +3,9 @@ using UnityEngine;
 
 public class PlayerController : MonoBehaviour
 {
+    public TileClass selectedTile;
+
+    public int playerRange;
     public Vector2Int mousePos;
 
     public float moveSpeed;
@@ -14,6 +17,7 @@ public class PlayerController : MonoBehaviour
 
     public float horizontal;
     public bool hit;
+    public bool place;
 
     [HideInInspector]
     public Vector2 spawnPos;
@@ -45,13 +49,6 @@ public class PlayerController : MonoBehaviour
 
         Vector2 movement = new Vector2(horizontal * moveSpeed, rb.velocity.y);
 
-        hit = Input.GetMouseButton(0);
-
-        if (hit)
-        {
-            terrianGenerator.RemoveTile(mousePos.x, mousePos.y);
-        }
-
         if (horizontal > 0)
             transform.localScale = new Vector3(-1, 1, 1);
         else if (horizontal < 0)
@@ -68,6 +65,18 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
+        hit = Input.GetMouseButtonDown(0);
+        place = Input.GetMouseButton(1);
+
+        // 不超出范围的才可以进行放置破坏操作
+        if (Vector2.Distance(transform.position, mousePos) <= playerRange)
+        {
+            if (hit)
+                terrianGenerator.RemoveTile(mousePos.x, mousePos.y);
+            else if (place && Vector2.Distance(transform.position, mousePos) > 1f)
+                terrianGenerator.CheckTile(selectedTile, mousePos.x, mousePos.y, false);
+        }
+
         mousePos.x = Mathf.RoundToInt(Camera.main.ScreenToWorldPoint(Input.mousePosition).x - 0.5f);
         mousePos.y = Mathf.RoundToInt(Camera.main.ScreenToWorldPoint(Input.mousePosition).y - 0.5f);
 

@@ -64,6 +64,7 @@
     <Compile Include="Assets\TileAtlas.cs" />
     <Compile Include="Assets\OreClass.cs" />
     <Compile Include="Assets\PlayerController\PlayerController.cs" />
+    <Compile Include="Assets\TileDropController.cs" />
     <Compile Include="Assets\BiomeClass.cs" />
   </ItemGroup>
   <ItemGroup>

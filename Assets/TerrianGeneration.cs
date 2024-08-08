@@ -6,19 +6,12 @@ public class TerrianGeneration : MonoBehaviour
 {
     public PlayerController player;
     public CamController cam;
+    public GameObject tileDrop;
 
-    /*
-     * 方块纹理素材
-     */
     [Header("Tile Sprites")]
     public float seed;
     public TileAtlas tileAtlas;
-
-    /*
-     * 生物群系类
-     */
     public BiomeClass[] biomes;
-
 
     [Header("Biomes")]
     public float biomeFreq;
@@ -39,10 +32,12 @@ public class TerrianGeneration : MonoBehaviour
     [Header("Ore Settings")]
     public OreClass[] ores;
 
-    private GameObject[] worldChunks;
+    private GameObject[] worldChunks;   // 区块列表
 
-    public List<Vector2> worldTiles = new List<Vector2>();
+    // 快结束了搞回 private 
+    public List<Vector2> worldTiles = new List<Vector2>();  // 以下两个列表索引，一维数组index位置存储方块坐标
     public List<GameObject> worldTilesObjects = new List<GameObject>();
+    public List<TileClass> worldTilesClasses = new List<TileClass>();
 
     private BiomeClass curBiome;
     private Color[] biomeCols;
@@ -88,7 +83,7 @@ public class TerrianGeneration : MonoBehaviour
     {
         for(int i = 0; i < worldChunks.Length; i++)
         {
-            if (Vector2.Distance(new Vector2((i * chunkSize) + (chunkSize / 2), 0), new Vector2(player.transform.position.x, 0)) > Camera.main.orthographicSize * 4f)
+            if (Vector2.Distance(new Vector2((i * chunkSize) + (chunkSize / 2), 0), new Vector2(player.transform.position.x, 0)) > Camera.main.orthographicSize * 6f)
                 worldChunks[i].SetActive(false);
             else
                 worldChunks[i].SetActive(true);
@@ -199,7 +194,7 @@ public class TerrianGeneration : MonoBehaviour
 
     private void GenerateTerrain()
     {
-        Sprite[] tileSprites;
+        TileClass tileClass;
         for(int x = 0; x < worldSize; x++)
         {
             // 在当前的x坐标计算地形高度，Perlin噪声可以在不同循环保持高度值平滑 
@@ -228,38 +223,34 @@ public class TerrianGeneration : MonoBehaviour
 
                 if (y < height - curBiome.dirtLayerHight)
                 {
-                    tileSprites = curBiome.tileAtlas.stone.tileSprites;
+                    tileClass = curBiome.tileAtlas.stone;
 
                     if (ores[0].spreadTexture.GetPixel(x, y).r > 0.5f && height - y > ores[0].maxSpawnHeight)
-                        tileSprites = tileAtlas.coal.tileSprites;
+                        tileClass = tileAtlas.coal;
                     if (ores[1].spreadTexture.GetPixel(x, y).r > 0.5f && height - y > ores[1].maxSpawnHeight)
-                        tileSprites = tileAtlas.iron.tileSprites;
+                        tileClass = tileAtlas.iron;
                     if (ores[2].spreadTexture.GetPixel(x, y).r > 0.5f && height - y > ores[2].maxSpawnHeight)
-                        tileSprites = tileAtlas.gold.tileSprites;
+                        tileClass = tileAtlas.gold;
                     if (ores[3].spreadTexture.GetPixel(x, y).r > 0.5f && height - y > ores[3].maxSpawnHeight)
-                        tileSprites = tileAtlas.diamond.tileSprites;
+                        tileClass = tileAtlas.diamond;
                 }
                 else if (y < height - 1)
-                {
-                    tileSprites = curBiome.tileAtlas.dirt.tileSprites;
-                }
+                    tileClass = curBiome.tileAtlas.dirt;
                 else
-                {
-                    tileSprites = curBiome.tileAtlas.grass.tileSprites;
-                }
+                    tileClass = curBiome.tileAtlas.grass;
 
                 // 根据噪声纹理确定当前坐标有没有洞穴
                 // 最后放置方块
                 if (generateCaves)
                 {
                     if (caveNoiseTexture.GetPixel(x, y).r > 0.5f)
-                    {
-                        PlaceTile(tileSprites, x, y, false);
-                    }
+                        PlaceTile(tileClass, x, y, true);
+                    else if(tileClass.wallVariant != null)
+                        PlaceTile(tileClass.wallVariant, x, y, true);
                 }
                 else
                 {
-                    PlaceTile(tileSprites, x, y, false);
+                    PlaceTile(tileClass, x, y, true);
                 }
 
                 // 生成到达地面表层后
@@ -275,14 +266,9 @@ public class TerrianGeneration : MonoBehaviour
                         if (worldTiles.Contains(new Vector2(x, y)))
                         {
                             if (curBiome.name == "Desert")
-                            {
                                 GenerateCactus(curBiome.tileAtlas, Random.Range(curBiome.minTreeHeight, curBiome.maxTreeHeight), x, y + 1);
-                            }
                             else
-                            {
-                                // 生成树
-                                GenerateTree(Random.Range(curBiome.minTreeHeight, curBiome.maxTreeHeight), x, y + 1);
-                            }
+                                GenerateTree(Random.Range(curBiome.minTreeHeight, curBiome.maxTreeHeight), x, y + 1);   // 生成树
                         }
                     }
                     else
@@ -295,9 +281,7 @@ public class TerrianGeneration : MonoBehaviour
                             if (worldTiles.Contains(new Vector2(x, y)))
                             {
                                 if (curBiome.tileAtlas.tallGrass != null)
-                                {
-                                    PlaceTile(curBiome.tileAtlas.tallGrass.tileSprites, x, y + 1, true);
-                                }
+                                    PlaceTile(curBiome.tileAtlas.tallGrass, x, y + 1, true);
                             }
                         }
                     }
@@ -350,19 +334,19 @@ public class TerrianGeneration : MonoBehaviour
         // 把树做成树样
         for (int i = 0; i < treeHeight; i++)
         {
-            PlaceTile(tileAtlas.log.tileSprites, x, y + i, true);
+            PlaceTile(tileAtlas.log, x, y + i, true);
         }
 
         // 添加叶子
-        PlaceTile(tileAtlas.leaf.tileSprites, x, y + treeHeight, true);
-        PlaceTile(tileAtlas.leaf.tileSprites, x, y + treeHeight + 1, true);
-        PlaceTile(tileAtlas.leaf.tileSprites, x, y + treeHeight + 2, true);
+        PlaceTile(tileAtlas.leaf, x, y + treeHeight, true);
+        PlaceTile(tileAtlas.leaf, x, y + treeHeight + 1, true);
+        PlaceTile(tileAtlas.leaf, x, y + treeHeight + 2, true);
 
-        PlaceTile(tileAtlas.leaf.tileSprites, x - 1, y + treeHeight, true);
-        PlaceTile(tileAtlas.leaf.tileSprites, x - 1, y + treeHeight + 1, true);
+        PlaceTile(tileAtlas.leaf, x - 1, y + treeHeight, true);
+        PlaceTile(tileAtlas.leaf, x - 1, y + treeHeight + 1, true);
 
-        PlaceTile(tileAtlas.leaf.tileSprites, x + 1, y + treeHeight, true);
-        PlaceTile(tileAtlas.leaf.tileSprites, x + 1, y + treeHeight + 1, true);
+        PlaceTile(tileAtlas.leaf, x + 1, y + treeHeight, true);
+        PlaceTile(tileAtlas.leaf, x + 1, y + treeHeight + 1, true);
 
         // TODO 根据树叶子大小生成不同大小的形状
     }
@@ -371,20 +355,56 @@ public class TerrianGeneration : MonoBehaviour
     {
         for (int i = 0; i < treeHeight; i++)
         {
-            PlaceTile(atlas.log.tileSprites, x, y + i, true);
+            PlaceTile(atlas.log, x, y + i, true);
+        }
+    }
+
+    /*
+     * 参数:
+     * tile: 玩家手中方块
+     * (x, y): 坐标
+     * isNaturallyPlaced: 自然放置
+     * 
+     * 当玩家主动进行放置操作时，
+     * 首先是正常进行放置操作，
+     * 同时增加如若背景墙中正有内容，将背景墙即刻破坏的分支
+     * 
+     * TODO 如果后期被添加“破坏方块的速率”，需要重新构写
+     */
+    public void CheckTile(TileClass tile, int x, int y, bool isNaturallyPlaced)
+    {
+        if (x >= 0 && x <= worldSize && y >= 0 && y <= worldSize)
+        {
+            if (!worldTiles.Contains(new Vector2Int(x, y)))
+            {
+                // 放置Tile
+                PlaceTile(tile, x, y, isNaturallyPlaced);
+            }
+            else
+            {
+                if (worldTilesClasses[worldTiles.IndexOf(new Vector2Int(x, y))].isBackground)
+                {
+                    // 覆盖Tile墙
+                    RemoveTile(x, y);
+                    PlaceTile(tile, x, y, isNaturallyPlaced);
+                }
+            }
         }
     }
 
     /*
      * 参数
-     * tileSprite: 对应方块Sprite类
+     * tile: 需要被放置的方块类
      * (x, y)坐标
+     * isNaturallyPlaced: 自然放置
      * 
      * 在特定位置生成对应的方块，并把方块放入合适的区块中
      * 并在列表中记录方块坐标，记录该位置有方块
      */
-    public void PlaceTile(Sprite[] tileSprites, int x, int y, bool backgroundElement)
+    public void PlaceTile(TileClass tile, int x, int y, bool isNaturallyPlaced)
     {
+        bool backgroundElement = tile.isBackground;
+
         if (!worldTiles.Contains(new Vector2Int(x, y)) && x >= 0 && x <= worldSize && y >= 0 && y <= worldSize)
         {
             GameObject newTile = new GameObject();
@@ -403,15 +423,25 @@ public class TerrianGeneration : MonoBehaviour
                 newTile.tag = "Ground";
             }
 
-            int spriteIndex = Random.Range(0, tileSprites.Length);
-            newTile.GetComponent<SpriteRenderer>().sprite = tileSprites[spriteIndex];   // 组件增加sprite
-            newTile.GetComponent<SpriteRenderer>().sortingOrder = -5;
+            int spriteIndex = Random.Range(0, tile.tileSprites.Length);
+            newTile.GetComponent<SpriteRenderer>().sprite = tile.tileSprites[spriteIndex];   // 组件增加sprite
 
-            newTile.name = tileSprites[0].name;
+            if (tile.isBackground)
+                newTile.GetComponent<SpriteRenderer>().sortingOrder = -10;
+            else
+                newTile.GetComponent<SpriteRenderer>().sortingOrder = -5;
+
+            if (tile.name.ToUpper().Contains("WALL"))
+                newTile.GetComponent<SpriteRenderer>().color = new Color(0.6f, 0.6f, 0.6f);
+
+            newTile.name = tile.tileSprites[0].name;
             newTile.transform.position = new Vector2(x + 0.5f, y + 0.5f);
+
+            tile.naturallyPlaced = isNaturallyPlaced;
 
             worldTiles.Add(newTile.transform.position - (Vector3.one * 0.5f));
             worldTilesObjects.Add(newTile);
+            worldTilesClasses.Add(tile);
         }
     }
 
@@ -419,7 +449,26 @@ public class TerrianGeneration : MonoBehaviour
     {
         if (worldTiles.Contains(new Vector2Int(x, y)) && x >= 0 && x <= worldSize && y >= 0 && y <= worldSize)
         {
+            TileClass currentTileClass = worldTilesClasses[worldTiles.IndexOf(new Vector2(x, y))];
+
             Destroy(worldTilesObjects[worldTiles.IndexOf(new Vector2(x, y))]);
+
+            // 根据是否掉落方块 进入方块掉落功能
+            if (currentTileClass.tileDrop)
+            {
+                GameObject newtileDrop = Instantiate(tileDrop, new Vector2(x, y + 0.5f), Quaternion.identity);
+                newtileDrop.GetComponent<SpriteRenderer>().sprite = currentTileClass.tileSprites[0];
+            }
+
+            worldTilesObjects.RemoveAt(worldTiles.IndexOf(new Vector2(x, y)));
+            worldTilesClasses.RemoveAt(worldTiles.IndexOf(new Vector2(x, y)));
+            worldTiles.RemoveAt(worldTiles.IndexOf(new Vector2(x, y)));
+
+            // 非自然生成方块被破坏将有背景墙被重新放置在当前坐标
+            if (currentTileClass.wallVariant != null && currentTileClass.naturallyPlaced)
+            {
+                PlaceTile(currentTileClass.wallVariant, x, y, true);
+            }
         }
     }
 
