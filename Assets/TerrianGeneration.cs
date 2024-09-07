@@ -4,6 +4,14 @@ using UnityEngine;
 
 public class TerrianGeneration : MonoBehaviour
 {
+    [Header("Lighting")]
+    // Tile light part
+    public Texture2D worldTilesMap;
+    public Material lightShader;
+    public float lightThreshold;
+    public float lightRadius = 7f;
+    public List<Vector2Int> unlitBlocks = new List<Vector2Int>();
+
     public PlayerController player;
     public CamController cam;
     public GameObject tileDrop;
@@ -45,6 +53,23 @@ public class TerrianGeneration : MonoBehaviour
 
     private void Start()
     {
+        // 光照变量初始化
+        worldTilesMap = new Texture2D(worldSize, worldSize);
+        worldTilesMap.filterMode = FilterMode.Bilinear;
+        lightShader.SetTexture("_ShadowTex", worldTilesMap);
+
+        for (int x = 0; x < worldSize; x++)
+        {
+            for(int y = 0; y < worldSize; y++)
+            {
+                // 设置每个像素初始白色
+                worldTilesMap.SetPixel(x, y, Color.white);
+            }
+        }
+        worldTilesMap.Apply();
+
+
+        // 地形生成
         // 随机种子生成
         seed = Random.Range(-10000, 10000);
 
@@ -68,6 +93,17 @@ public class TerrianGeneration : MonoBehaviour
         // 创建地形
         CreateChunks();
         GenerateTerrain();
+
+        for (int x = 0; x < worldSize; x++)
+        {
+            for (int y = 0; y < worldSize; y++)
+            {
+                if (worldTilesMap.GetPixel(x, y) == Color.white)
+                    LightBlock(x, y, 1f, 0);
+            }
+        }
+
+        worldTilesMap.Apply();
 
         cam.worldSize = worldSize;
         cam.Spawn(new Vector3(player.spawnPos.x, player.spawnPos.y, cam.transform.position.z));
@@ -289,6 +325,8 @@ public class TerrianGeneration : MonoBehaviour
             }
         }
 
+        worldTilesMap.Apply();
+
     }
 
     /* 
@@ -377,6 +415,7 @@ public class TerrianGeneration : MonoBehaviour
         {
             if (!worldTiles.Contains(new Vector2Int(x, y)))
             {
+                RemoveLightSource(x, y);
                 // 放置Tile
                 PlaceTile(tile, x, y, isNaturallyPlaced);
             }
@@ -384,6 +423,7 @@ public class TerrianGeneration : MonoBehaviour
             {
                 if (worldTilesClasses[worldTiles.IndexOf(new Vector2Int(x, y))].isBackground)
                 {
+                    RemoveLightSource(x, y);
                     // 覆盖Tile墙
                     RemoveTile(x, y);
                     PlaceTile(tile, x, y, isNaturallyPlaced);
@@ -432,16 +472,23 @@ public class TerrianGeneration : MonoBehaviour
                 newTile.GetComponent<SpriteRenderer>().sortingOrder = -5;
 
             if (tile.name.ToUpper().Contains("WALL"))
+            {
                 newTile.GetComponent<SpriteRenderer>().color = new Color(0.6f, 0.6f, 0.6f);
+                worldTilesMap.SetPixel(x, y, Color.black);
+            }
+            else if (!tile.isBackground)
+            {
+                worldTilesMap.SetPixel(x, y, Color.black);
+            }
 
             newTile.name = tile.tileSprites[0].name;
             newTile.transform.position = new Vector2(x + 0.5f, y + 0.5f);
 
-            tile.naturallyPlaced = isNaturallyPlaced;
+            TileClass newTileClass = TileClass.CreateInstance(tile, isNaturallyPlaced);
 
             worldTiles.Add(newTile.transform.position - (Vector3.one * 0.5f));
             worldTilesObjects.Add(newTile);
-            worldTilesClasses.Add(tile);
+            worldTilesClasses.Add(newTileClass);
         }
     }
 
@@ -452,12 +499,13 @@ public class TerrianGeneration : MonoBehaviour
             TileClass currentTileClass = worldTilesClasses[worldTiles.IndexOf(new Vector2(x, y))];
 
             Destroy(worldTilesObjects[worldTiles.IndexOf(new Vector2(x, y))]);
+            worldTilesMap.SetPixel(x, y, Color.white);
 
             // 根据是否掉落方块 进入方块掉落功能
             if (currentTileClass.tileDrop)
             {
                 GameObject newtileDrop = Instantiate(tileDrop, new Vector2(x, y + 0.5f), Quaternion.identity);
-                newtileDrop.GetComponent<SpriteRenderer>().sprite = currentTileClass.tileSprites[0];
+                newtileDrop.GetComponent<SpriteRenderer>().sprite = currentTileClass.tileDrop;
             }
 
             worldTilesObjects.RemoveAt(worldTiles.IndexOf(new Vector2(x, y)));
@@ -465,11 +513,127 @@ public class TerrianGeneration : MonoBehaviour
             worldTiles.RemoveAt(worldTiles.IndexOf(new Vector2(x, y)));
 
             // 非自然生成方块被破坏将有背景墙被重新放置在当前坐标
-            if (currentTileClass.wallVariant != null && currentTileClass.naturallyPlaced)
+            if (currentTileClass.wallVariant != null)
+            { 
+                if (currentTileClass.naturallyPlaced)
+                {
+                    PlaceTile(currentTileClass.wallVariant, x, y, true);
+                }
+            
+            }
+
+            LightBlock(x, y, 1f, 0);
+            worldTilesMap.Apply();
+        }
+    }
+
+    /*
+     * 光扩散函数
+     * 参数：
+     * (x, y): 当前位置
+     * intensity: 单像素光照强度，强的亮
+     * iteration: 迭代次数，比lightRadius小
+     */
+    void LightBlock(int x, int y, float intensity, int iteration) 
+    {
+        if (iteration < lightRadius)
+        {
+            worldTilesMap.SetPixel(x, y, Color.white * intensity);
+
+            // nx is neighbor x, and also neighbor y
+            // 处理当前坐标的周围光照
+            for (int nx = x - 1; nx < x + 2; nx++)
             {
-                PlaceTile(currentTileClass.wallVariant, x, y, true);
+                for (int ny = y - 1; ny < y + 2; ny++)
+                {
+                    if (nx != x || ny != y)
+                    {
+                        // 根据距离计算新光照强度
+                        float dist = Vector2.Distance(new Vector2(x, y), new Vector2(nx, ny));
+                        float targetIntensity = Mathf.Pow(0.7f, dist) * intensity;
+                        if (worldTilesMap.GetPixel(nx, ny) != null)
+                        {
+                            if (worldTilesMap.GetPixel(nx, ny).r < targetIntensity) // 只有比光暗的地方会被照亮
+                                LightBlock(nx, ny, targetIntensity, iteration + 1);
+                        }
+                    }
+                }
+            }
+
+            worldTilesMap.Apply();
+        }
+    }
+
+    /*
+     * When place tile
+     * remove the light there
+     */
+    void RemoveLightSource(int x, int y)
+    {
+        // 灭光
+        unlitBlocks.Clear();
+        UnLightBlock(x, y, x, y);
+
+        List<Vector2Int> toRelight = new List<Vector2Int>();
+
+        // unlitBlocks中的每一个坐标，它们的邻居，遍历
+        // unlitblocks周围有亮光比自己大的点，就会放入toRelight
+        foreach (Vector2Int block in unlitBlocks)
+        {
+            for (int nx = block.x - 1; nx < block.x + 2; nx++)
+            {
+                for (int ny = block.y - 1; ny < block.y + 2; ny++)
+                {
+                    if (worldTilesMap.GetPixel(nx, ny) != null) // if there have a light
+                    {
+                        if (worldTilesMap.GetPixel(nx, ny).r > worldTilesMap.GetPixel(block.x, block.y).r)
+                        {
+                            if (!toRelight.Contains(new Vector2Int(nx, ny)))
+                                toRelight.Add(new Vector2Int(nx, ny));
+                        }
+                    }
+                }
             }
         }
+
+        // 扩散较亮区域的亮光
+        foreach (Vector2Int source in toRelight)
+        {
+            LightBlock(source.x, source.y, worldTilesMap.GetPixel(source.x, source.y).r, 0);
+        }
+
+        worldTilesMap.Apply();
+    }
+
+    /*
+     * 参数：
+     * (x, y)：位置
+     * (ix, iy)：initial 位置 
+     * 
+     * 灭光函数，以输入点为中心，光半径内变黑并调用点光函数重新渲染
+     */
+    void UnLightBlock(int x, int y, int ix, int iy)
+    {
+        if (Mathf.Abs(x - ix) >= lightRadius || Mathf.Abs(y - iy) >= lightRadius || unlitBlocks.Contains(new Vector2Int(x, y)))
+            return;
+        
+        for (int nx = x - 1; nx < x + 2; nx++)
+        {
+            for (int ny = y - 1; ny < y + 2; ny++)
+            {
+                if (nx != x || ny != y)
+                {
+                    if (worldTilesMap.GetPixel(nx, ny) != null)
+                    {
+                        if (worldTilesMap.GetPixel(nx, ny).r < worldTilesMap.GetPixel(x, y).r) // 周围亮度低于
+                            UnLightBlock(nx, ny, ix, iy);
+                    }
+                }
+            }
+        }
+
+        worldTilesMap.SetPixel(x, y, Color.black);
+        unlitBlocks.Add(new Vector2Int(x, y));
     }
 
 }
