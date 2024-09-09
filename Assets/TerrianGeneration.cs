@@ -5,10 +5,11 @@ using UnityEngine;
 public class TerrianGeneration : MonoBehaviour
 {
     [Header("Lighting")]
-    // Tile light part
+    // Tile light
     public Texture2D worldTilesMap;
     public Material lightShader;
-    public float lightThreshold;
+    public float groundLightThreshold = 0.7f;
+    public float airLightThreshold = 0.85f;
     public float lightRadius = 7f;
     public List<Vector2Int> unlitBlocks = new List<Vector2Int>();
 
@@ -40,12 +41,14 @@ public class TerrianGeneration : MonoBehaviour
     [Header("Ore Settings")]
     public OreClass[] ores;
 
-    private GameObject[] worldChunks;   // 区块列表
+    // 区块父类列表
+    private GameObject[] worldChunks;
 
-    // 快结束了搞回 private 
-    public List<Vector2> worldTiles = new List<Vector2>();  // 以下两个列表索引，一维数组index位置存储方块坐标
-    public List<GameObject> worldTilesObjects = new List<GameObject>();
-    public List<TileClass> worldTilesClasses = new List<TileClass>();
+    // 方块资源总存储结构，分别是gameobject和tile class
+    private GameObject[,] world_ForegroundObjects;
+    private GameObject[,] world_BackgroundObjects;
+    private TileClass[,] world_ForegroundTiles;
+    private TileClass[,] world_BackgroundTiles;
 
     private BiomeClass curBiome;
     private Color[] biomeCols;
@@ -53,14 +56,22 @@ public class TerrianGeneration : MonoBehaviour
 
     private void Start()
     {
+        // 方块类管理区初始化
+        world_ForegroundObjects = new GameObject[worldSize, worldSize];
+        world_BackgroundObjects = new GameObject[worldSize, worldSize];
+        world_ForegroundTiles = new TileClass[worldSize, worldSize];
+        world_BackgroundTiles = new TileClass[worldSize, worldSize];
+
         // 光照变量初始化
-        worldTilesMap = new Texture2D(worldSize, worldSize);
-        worldTilesMap.filterMode = FilterMode.Bilinear;
+        worldTilesMap = new Texture2D(worldSize, worldSize)
+        {
+            filterMode = FilterMode.Point
+        };
         lightShader.SetTexture("_ShadowTex", worldTilesMap);
 
         for (int x = 0; x < worldSize; x++)
         {
-            for(int y = 0; y < worldSize; y++)
+            for (int y = 0; y < worldSize; y++)
             {
                 // 设置每个像素初始白色
                 worldTilesMap.SetPixel(x, y, Color.white);
@@ -85,7 +96,6 @@ public class TerrianGeneration : MonoBehaviour
             biomeCols[i] = biomes[i].biomeCol;
         }
 
-        // TODO 由于铁和煤类似的噪声分布，把随机算法变得复杂一些或者为它们生成特定的种子
         DrawBiomeMap();
         DrawTextures();
         DrawCavesAndOres();
@@ -94,6 +104,7 @@ public class TerrianGeneration : MonoBehaviour
         CreateChunks();
         GenerateTerrain();
 
+        // 自然光照
         for (int x = 0; x < worldSize; x++)
         {
             for (int y = 0; y < worldSize; y++)
@@ -117,25 +128,34 @@ public class TerrianGeneration : MonoBehaviour
 
     void RefreshChunks()
     {
-        for(int i = 0; i < worldChunks.Length; i++)
+        for (int i = 0; i < worldChunks.Length; i++)
         {
-            if (Vector2.Distance(new Vector2((i * chunkSize) + (chunkSize / 2), 0), new Vector2(player.transform.position.x, 0)) > Camera.main.orthographicSize * 6f)
+            if (Vector2.Distance(new Vector2((i * chunkSize) + (chunkSize / 2), 0), 
+                    new Vector2(player.transform.position.x, 0)) > Camera.main.orthographicSize * 6f)
                 worldChunks[i].SetActive(false);
             else
                 worldChunks[i].SetActive(true);
         }
     }
 
+    /*
+     * 纹理绘制几个方法：
+     * 
+     * 最先绘制生物群系纹理
+     * 根据当前像素的生物群系，
+     * 指导后续的洞穴和矿物纹理
+     */
     public void DrawBiomeMap()
     {
         float b;
         Color col;
         biomeMap = new Texture2D(worldSize, worldSize);
 
-        for(int x = 0; x < biomeMap.width; x++)
+        for (int x = 0; x < biomeMap.width; x++)
         {
             for (int y = 0; y < biomeMap.height; y++)
             {
+                // 通过平滑的噪声值b在颜色盘寻找内容，不超过阈值的颜色会凑在一起
                 b = Mathf.PerlinNoise((x + seed) * biomeFreq, (y + seed) * biomeFreq);
                 col = biomeGradient.Evaluate(b);
                 biomeMap.SetPixel(x, y, col);
@@ -181,6 +201,9 @@ public class TerrianGeneration : MonoBehaviour
         }
     }
 
+    /*
+     * 对每个生物群系的每个矿物内容、洞穴内容进行生成
+     */
     public void DrawTextures()
     {
         for (int i = 0; i < biomes.Length; i++)
@@ -190,11 +213,44 @@ public class TerrianGeneration : MonoBehaviour
             {
                 biomes[i].ores[o].spreadTexture = new Texture2D(worldSize, worldSize);
                 GenerateNoiseTextures(biomes[i].ores[o].frequency, biomes[i].ores[o].size, ref biomes[i].ores[o].spreadTexture);
-
             }
         }
     }
 
+    /* 
+     * 参数：
+     * frequency：特定随机概率
+     * limit: 表面值
+     * noiseTexture：特定随机纹理
+     * 
+     * 可以生成对应需求的地形的噪声纹理，让它们聚集
+     * 对于任何超过表面值的噪声像素，将其设置为纯白
+     * 纹理中纯白部分是地形会生成的位置
+     */
+    private void GenerateNoiseTextures(float frequency, float limit, ref Texture2D noiseTexture)
+    {
+        float v;
+        noiseTexture = new Texture2D(worldSize, worldSize);
+
+        for (int x = 0; x < noiseTexture.width; x++)
+        {
+            for (int y = 0; y < noiseTexture.height; y++)
+            {
+                v = Mathf.PerlinNoise((x + seed) * frequency, (y + seed) * frequency);
+
+                if (v > limit)
+                    noiseTexture.SetPixel(x, y, Color.white);
+                else
+                    noiseTexture.SetPixel(x, y, Color.black);
+            }
+        }
+
+        noiseTexture.Apply();
+    }
+
+    /* 
+     *  正式地形生成部分
+     */
     private void CreateChunks()
     {
         int numChunks = worldSize / chunkSize;
@@ -202,7 +258,8 @@ public class TerrianGeneration : MonoBehaviour
 
         for (int i = 0; i < numChunks; i++)
         {
-            GameObject newChunk = new GameObject();
+            GameObject newGameObject = new GameObject();
+            GameObject newChunk = newGameObject;
             newChunk.name = i.ToString();
             newChunk.transform.parent = this.transform;
             worldChunks[i] = newChunk;
@@ -212,15 +269,9 @@ public class TerrianGeneration : MonoBehaviour
 
     public BiomeClass GetCurrentBiome(int x, int y)
     {
+        // TODO
         // 改变curBiome的值
 
-        //for (int i = 0; i < biomes.Length; i++)
-        //{
-        //    if (biomes[i].biomeCol == biomeMap.GetPixel(x, y))
-        //    {
-        //        return biomes[i];
-        //    }
-        //}
         if (System.Array.IndexOf(biomeCols, biomeMap.GetPixel(x, y)) >= 0)
             return biomes[System.Array.IndexOf(biomeCols, biomeMap.GetPixel(x, y))];
 
@@ -231,23 +282,23 @@ public class TerrianGeneration : MonoBehaviour
     private void GenerateTerrain()
     {
         TileClass tileClass;
-        for(int x = 0; x < worldSize; x++)
+        for (int x = 0; x < worldSize - 1; x++)
         {
             // 在当前的x坐标计算地形高度，Perlin噪声可以在不同循环保持高度值平滑 
             float height;
 
-            for(int y = 0; y < worldSize; y++)
+            /* 根据当前高度改变地形方块
+             * 地形的每一列：
+             *      第一层草方块
+             *      第二层土方块
+             *      第三层石头方块
+             *          - 石头方块中，根据矿石的稀有度从小到大生成
+             * 
+             * 根据不同的生物群系随机，选择对应的方块集
+             */
+            for (int y = 0; y < worldSize; y++)
             {
-                /* 根据当前高度改变地形方块
-                 * 地形的每一列：
-                 *      第一层草方块
-                 *      第二层土方块
-                 *      第三层石头方块
-                 *          - 石头方块中，根据矿石的稀有度从小到大生成
-                 * 
-                 * 根据不同的生物群系随机，选择对应的方块集
-                 */
-                // 根据生物群系颜色
+                // 根据生物群系颜色,制造高度
                 height = Mathf.PerlinNoise((x + seed) * terrainFreq, seed * terrainFreq) * curBiome.heightMultiplier + heightAddition;
 
                 if (x == worldSize / 2)
@@ -281,7 +332,7 @@ public class TerrianGeneration : MonoBehaviour
                 {
                     if (caveNoiseTexture.GetPixel(x, y).r > 0.5f)
                         PlaceTile(tileClass, x, y, true);
-                    else if(tileClass.wallVariant != null)
+                    else if (tileClass.wallVariant != null)
                         PlaceTile(tileClass.wallVariant, x, y, true);
                 }
                 else
@@ -291,7 +342,6 @@ public class TerrianGeneration : MonoBehaviour
 
                 // 生成到达地面表层后
                 // 树地形从草皮表层继续生成，代码至此往下生成树
-
                 if (y >= height - 1)
                 {
                     int t = Random.Range(0, curBiome.treeChance);
@@ -299,7 +349,7 @@ public class TerrianGeneration : MonoBehaviour
                     if (t == 1)
                     {
                         // 在当前有方块为支撑底部的地方
-                        if (worldTiles.Contains(new Vector2(x, y)))
+                        if (GetTileFromWorld(x, y))
                         {
                             if (curBiome.name == "Desert")
                                 GenerateCactus(curBiome.tileAtlas, Random.Range(curBiome.minTreeHeight, curBiome.maxTreeHeight), x, y + 1);
@@ -314,7 +364,7 @@ public class TerrianGeneration : MonoBehaviour
 
                         if (i == 1)
                         {
-                            if (worldTiles.Contains(new Vector2(x, y)))
+                            if (GetTileFromWorld(x, y))
                             {
                                 if (curBiome.tileAtlas.tallGrass != null)
                                     PlaceTile(curBiome.tileAtlas.tallGrass, x, y + 1, true);
@@ -329,62 +379,33 @@ public class TerrianGeneration : MonoBehaviour
 
     }
 
-    /* 
-     * 参数：
-     * frequency：特定随机概率
-     * limit: 表面值
-     * noiseTexture：特定随机纹理
-     * 
-     * 可以生成对应需求的地形的噪声纹理，让它们聚集
-     * 对于任何超过表面值的噪声像素，将其设置为纯白
-     * 纹理中纯白部分是地形会生成的位置
-     */
-    private void GenerateNoiseTextures(float frequency, float limit, ref Texture2D noiseTexture)
-    {
-        float v;
-        noiseTexture = new Texture2D(worldSize, worldSize);
-
-        for(int x = 0; x < noiseTexture.width; x++)
-        {
-            for(int y = 0; y < noiseTexture.height; y++)
-            {
-                // create a 2D texture
-                v = Mathf.PerlinNoise((x + seed) * frequency, (y + seed) * frequency);
-
-                if (v > limit)
-                    noiseTexture.SetPixel(x, y, Color.white);
-                else
-                    noiseTexture.SetPixel(x, y, Color.black);
-            }
-        }
-
-        noiseTexture.Apply();
-    }
 
     /*
      * 参数：
      * (x, y)坐标
      * 
      * 在这个坐标的位置向上拔地而起一棵树
+     * 树和仙人掌的生成是侵占性的，
+     * 需要用CheckTile确保不会和别的方块生成到一起
      */
     public void GenerateTree(int treeHeight, int x, int y)
     {
         // 把树做成树样
         for (int i = 0; i < treeHeight; i++)
         {
-            PlaceTile(tileAtlas.log, x, y + i, true);
+            CheckTile(tileAtlas.log, x, y + i, true);
         }
 
         // 添加叶子
-        PlaceTile(tileAtlas.leaf, x, y + treeHeight, true);
-        PlaceTile(tileAtlas.leaf, x, y + treeHeight + 1, true);
-        PlaceTile(tileAtlas.leaf, x, y + treeHeight + 2, true);
+        CheckTile(tileAtlas.leaf, x, y + treeHeight, true);
+        CheckTile(tileAtlas.leaf, x, y + treeHeight + 1, true);
+        CheckTile(tileAtlas.leaf, x, y + treeHeight + 2, true);
 
-        PlaceTile(tileAtlas.leaf, x - 1, y + treeHeight, true);
-        PlaceTile(tileAtlas.leaf, x - 1, y + treeHeight + 1, true);
+        CheckTile(tileAtlas.leaf, x - 1, y + treeHeight, true);
+        CheckTile(tileAtlas.leaf, x - 1, y + treeHeight + 1, true);
 
-        PlaceTile(tileAtlas.leaf, x + 1, y + treeHeight, true);
-        PlaceTile(tileAtlas.leaf, x + 1, y + treeHeight + 1, true);
+        CheckTile(tileAtlas.leaf, x + 1, y + treeHeight, true);
+        CheckTile(tileAtlas.leaf, x + 1, y + treeHeight + 1, true);
 
         // TODO 根据树叶子大小生成不同大小的形状
     }
@@ -393,43 +414,75 @@ public class TerrianGeneration : MonoBehaviour
     {
         for (int i = 0; i < treeHeight; i++)
         {
-            PlaceTile(atlas.log, x, y + i, true);
+            CheckTile(atlas.log, x, y + i, true);
         }
     }
 
     /*
      * 参数:
-     * tile: 玩家手中方块
+     * tile: 方块
      * (x, y): 坐标
      * isNaturallyPlaced: 自然放置
      * 
-     * 当玩家主动进行放置操作时，
-     * 首先是正常进行放置操作，
-     * 同时增加如若背景墙中正有内容，将背景墙即刻破坏的分支
+     * 玩家或特殊的放置操作
      * 
-     * TODO 如果后期被添加“破坏方块的速率”，需要重新构写
+     * 当主动进行放置操作时，
+     * 首先是正常进行放置操作，正常放置的方块附近必须有其他方块
+     * 同时增加如若背景墙中正有内容，将背景墙即刻破坏的分支
      */
     public void CheckTile(TileClass tile, int x, int y, bool isNaturallyPlaced)
     {
         if (x >= 0 && x <= worldSize && y >= 0 && y <= worldSize)
         {
-            if (!worldTiles.Contains(new Vector2Int(x, y)))
+            // 背景方块只能放空白区域
+            if (tile.isBackground)
             {
-                RemoveLightSource(x, y);
-                // 放置Tile
-                PlaceTile(tile, x, y, isNaturallyPlaced);
-            }
-            else
-            {
-                if (worldTilesClasses[worldTiles.IndexOf(new Vector2Int(x, y))].isBackground)
+                if (!GetTileFromWorld(x, y))
                 {
                     RemoveLightSource(x, y);
-                    // 覆盖Tile墙
-                    RemoveTile(x, y);
                     PlaceTile(tile, x, y, isNaturallyPlaced);
                 }
             }
+            else
+            {
+                // 普通方块只能相邻别的墙体或实体
+                if (HasNeighbor(x, y))
+                {
+                    // 当前位置无tile类直接放置
+                    // 当前位置有背景tile类覆盖在上面
+                    if (!GetTileFromWorld(x, y))
+                    {
+                        RemoveLightSource(x, y);
+                        PlaceTile(tile, x, y, isNaturallyPlaced);
+                    }
+                    else
+                    {
+                        if (GetTileFromWorld(x, y).isBackground)
+                        {
+                            RemoveLightSource(x, y);
+                            PlaceTile(tile, x, y, isNaturallyPlaced);
+                        }
+                    }
+                }
+
+            }
         }
+    }
+
+    // 判断四周是否有tile类
+    bool HasNeighbor(int x, int y)
+    {
+        int[,] offset = new int[,] { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+        for (int i = 0; i < 4; i++)
+        {
+            int nx = x + offset[i, 0];
+            int ny = y + offset[i, 1];
+            if (GetTileFromWorld(nx, ny))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /*
@@ -443,89 +496,186 @@ public class TerrianGeneration : MonoBehaviour
      */
     public void PlaceTile(TileClass tile, int x, int y, bool isNaturallyPlaced)
     {
-        bool backgroundElement = tile.isBackground;
-
-        if (!worldTiles.Contains(new Vector2Int(x, y)) && x >= 0 && x <= worldSize && y >= 0 && y <= worldSize)
+        if (x >= 0 && x < worldSize && y >= 0 && y < worldSize)
         {
-            GameObject newTile = new GameObject();
+            GameObject newGameObject = new GameObject();
+            GameObject newTileObject = newGameObject;
 
-            // 增加区块概念，将当前tile放置到对应的chunk
+            // gameobject基本属性
+            newTileObject.name = tile.tileSprites[0].name;
+            newTileObject.transform.position = new Vector2(x + 0.5f, y + 0.5f);
+
+            // 将当前tile放置到对应的chunk
             int chunkCoord = Mathf.RoundToInt(Mathf.Round(x / chunkSize) * chunkSize);
             chunkCoord /= chunkSize;
+            newTileObject.transform.parent = worldChunks[chunkCoord].transform;  // 添加为对应区块的子对象
 
-            newTile.transform.parent = worldChunks[chunkCoord].transform;  // 添加为对应区块的子对象
-
-            newTile.AddComponent<SpriteRenderer>(); // 添加Sprite Renderer
-            if (!backgroundElement)
-            {
-                newTile.AddComponent<BoxCollider2D>();
-                newTile.GetComponent<BoxCollider2D>().size = Vector2.one;
-                newTile.tag = "Ground";
-            }
-
+            // 给当前tile添加Sprite
+            // Sprite可能有变种,随机选择
+            newTileObject.AddComponent<SpriteRenderer>();
             int spriteIndex = Random.Range(0, tile.tileSprites.Length);
-            newTile.GetComponent<SpriteRenderer>().sprite = tile.tileSprites[spriteIndex];   // 组件增加sprite
+            newTileObject.GetComponent<SpriteRenderer>().sprite = tile.tileSprites[spriteIndex];
 
-            if (tile.isBackground)
-                newTile.GetComponent<SpriteRenderer>().sortingOrder = -10;
+            // 光照部分根据透明度改变
+            if (tile.isPassLight)
+                worldTilesMap.SetPixel(x, y, Color.white);
             else
-                newTile.GetComponent<SpriteRenderer>().sortingOrder = -5;
-
-            if (tile.name.ToUpper().Contains("WALL"))
-            {
-                newTile.GetComponent<SpriteRenderer>().color = new Color(0.6f, 0.6f, 0.6f);
                 worldTilesMap.SetPixel(x, y, Color.black);
-            }
-            else if (!tile.isBackground)
+
+            // 背景前景区分
+            if (tile.isBackground)
             {
-                worldTilesMap.SetPixel(x, y, Color.black);
+                // 背景非实体方块
+                // 背景墙颜色更深以便区分
+                newTileObject.GetComponent<SpriteRenderer>().sortingOrder = -10;
+                if (tile.name.ToLower().Contains("wall"))
+                    newTileObject.GetComponent<SpriteRenderer>().color = new Color(0.6f, 0.6f, 0.6f);
+            }
+            else
+            {
+                // 前景实体方块
+                newTileObject.GetComponent<SpriteRenderer>().sortingOrder = -5;
+                newTileObject.AddComponent<BoxCollider2D>();
+                newTileObject.GetComponent<BoxCollider2D>().size = Vector2.one;
+                newTileObject.tag = "Ground";
             }
 
-            newTile.name = tile.tileSprites[0].name;
-            newTile.transform.position = new Vector2(x + 0.5f, y + 0.5f);
-
+            //方块总存储结构更新
             TileClass newTileClass = TileClass.CreateInstance(tile, isNaturallyPlaced);
+            AddTileToWorld(x, y, newTileClass);
+            AddObjectToWorld(x, y, newTileObject, newTileClass);
 
-            worldTiles.Add(newTile.transform.position - (Vector3.one * 0.5f));
-            worldTilesObjects.Add(newTile);
-            worldTilesClasses.Add(newTileClass);
         }
     }
 
+
+
     public void RemoveTile(int x, int y)
     {
-        if (worldTiles.Contains(new Vector2Int(x, y)) && x >= 0 && x <= worldSize && y >= 0 && y <= worldSize)
+        if (GetTileFromWorld(x, y) && x >= 0 && x <= worldSize && y >= 0 && y <= worldSize)
         {
-            TileClass currentTileClass = worldTilesClasses[worldTiles.IndexOf(new Vector2(x, y))];
+            TileClass currentTileClass = GetTileFromWorld(x, y);
 
-            Destroy(worldTilesObjects[worldTiles.IndexOf(new Vector2(x, y))]);
-            worldTilesMap.SetPixel(x, y, Color.white);
+            // 破坏GameObject
+            Destroy(GetObjectFromWorld(x, y));
 
-            // 根据是否掉落方块 进入方块掉落功能
+            // 方块掉落功能
             if (currentTileClass.tileDrop)
             {
                 GameObject newtileDrop = Instantiate(tileDrop, new Vector2(x, y + 0.5f), Quaternion.identity);
                 newtileDrop.GetComponent<SpriteRenderer>().sprite = currentTileClass.tileDrop;
             }
 
-            worldTilesObjects.RemoveAt(worldTiles.IndexOf(new Vector2(x, y)));
-            worldTilesClasses.RemoveAt(worldTiles.IndexOf(new Vector2(x, y)));
-            worldTiles.RemoveAt(worldTiles.IndexOf(new Vector2(x, y)));
+            // 方块总存储结构更新
+            RemoveTileFromWorld(x, y);
+            RemoveObjectFromWorld(x, y);
 
-            // 非自然生成方块被破坏将有背景墙被重新放置在当前坐标
-            if (currentTileClass.wallVariant != null)
-            { 
-                if (currentTileClass.naturallyPlaced)
-                {
-                    PlaceTile(currentTileClass.wallVariant, x, y, true);
-                }
-            
+            // 自然生成方块被破坏,将背景变体放置在当前坐标
+            if (currentTileClass.wallVariant != null && currentTileClass.naturallyPlaced)
+            {
+                RemoveLightSource(x, y);
+                PlaceTile(currentTileClass.wallVariant, x, y, true);
             }
 
-            LightBlock(x, y, 1f, 0);
-            worldTilesMap.Apply();
+            // 此处无任何方块,认为是光源
+            // 否则遵循此函数外默认光照的结果(这里不需要动)
+            if (!GetTileFromWorld(x, y))
+            {
+                worldTilesMap.SetPixel(x, y, Color.white);
+                LightBlock(x, y, 1f, 0);
+                worldTilesMap.Apply();
+            }
         }
     }
+
+
+    /*
+        自动管理前景Tile和背景Tile的函数
+        分别为:添加,删除,获取
+
+        分别对GameObject资产和TileClass资产都有相关方法
+
+        对单一坐标的Tile资产获取总是先获取前景后获取背景
+    */
+    void AddObjectToWorld(int x, int y, GameObject tileObject, TileClass tile)
+    {
+        if (tile.isBackground)
+        {
+            world_BackgroundObjects[x, y] = tileObject;
+        }
+        else
+        {
+            world_ForegroundObjects[x, y] = tileObject;
+        }
+    }
+
+    void RemoveObjectFromWorld(int x, int y)
+    {
+        if (world_ForegroundObjects[x, y] != null)
+        {
+            world_ForegroundObjects[x, y] = null;
+        }
+        else if (world_BackgroundObjects[x, y] != null)
+        {
+            world_BackgroundObjects[x, y] = null;
+        }
+        // else if here is no tile: do nothing
+    }
+
+    GameObject GetObjectFromWorld(int x, int y)
+    {
+        if (world_ForegroundObjects[x, y] != null)
+        {
+            return world_ForegroundObjects[x, y];
+        }
+        else if (world_BackgroundObjects[x, y] != null)
+        {
+            return world_BackgroundObjects[x, y];
+        }
+
+        return null;
+    }
+
+    void AddTileToWorld(int x, int y, TileClass tile)
+    {
+        if (tile.isBackground)
+        {
+            world_BackgroundTiles[x, y] = tile;
+        }
+        else
+        {
+            world_ForegroundTiles[x, y] = tile;
+        }
+    }
+
+    void RemoveTileFromWorld(int x, int y)
+    {
+        if (world_ForegroundTiles[x, y] != null)
+        {
+            world_ForegroundTiles[x, y] = null;
+        }
+        else if (world_BackgroundTiles[x, y] != null)
+        {
+            world_BackgroundTiles[x, y] = null;
+        }
+        // else if here is no tile: do nothing
+    }
+
+    TileClass GetTileFromWorld(int x, int y)
+    {
+        if (world_ForegroundTiles[x, y] != null)
+        {
+            return world_ForegroundTiles[x, y];
+        }
+        else if (world_BackgroundTiles[x, y] != null)
+        {
+            return world_BackgroundTiles[x, y];
+        }
+
+        return null;
+    }
+
+
 
     /*
      * 光扩散函数
@@ -534,11 +684,20 @@ public class TerrianGeneration : MonoBehaviour
      * intensity: 单像素光照强度，强的亮
      * iteration: 迭代次数，比lightRadius小
      */
-    void LightBlock(int x, int y, float intensity, int iteration) 
+    void LightBlock(int x, int y, float intensity, int iteration)
     {
         if (iteration < lightRadius)
         {
             worldTilesMap.SetPixel(x, y, Color.white * intensity);
+
+            float thresh = groundLightThreshold;
+            if (x >= 0 && x < worldSize && y >= 0 && y < worldSize)
+            {
+                if (world_ForegroundTiles[x, y])
+                    thresh = groundLightThreshold;
+                else
+                    thresh = airLightThreshold;
+            }
 
             // nx is neighbor x, and also neighbor y
             // 处理当前坐标的周围光照
@@ -550,7 +709,7 @@ public class TerrianGeneration : MonoBehaviour
                     {
                         // 根据距离计算新光照强度
                         float dist = Vector2.Distance(new Vector2(x, y), new Vector2(nx, ny));
-                        float targetIntensity = Mathf.Pow(0.7f, dist) * intensity;
+                        float targetIntensity = Mathf.Pow(thresh, dist) * intensity;
                         if (worldTilesMap.GetPixel(nx, ny) != null)
                         {
                             if (worldTilesMap.GetPixel(nx, ny).r < targetIntensity) // 只有比光暗的地方会被照亮
@@ -565,8 +724,8 @@ public class TerrianGeneration : MonoBehaviour
     }
 
     /*
-     * When place tile
-     * remove the light there
+     * 将坐标附近较亮的光记录并扩散
+     * 破坏光线条件并重组
      */
     void RemoveLightSource(int x, int y)
     {
@@ -584,7 +743,7 @@ public class TerrianGeneration : MonoBehaviour
             {
                 for (int ny = block.y - 1; ny < block.y + 2; ny++)
                 {
-                    if (worldTilesMap.GetPixel(nx, ny) != null) // if there have a light
+                    if (worldTilesMap.GetPixel(nx, ny) != null)
                     {
                         if (worldTilesMap.GetPixel(nx, ny).r > worldTilesMap.GetPixel(block.x, block.y).r)
                         {
@@ -596,7 +755,7 @@ public class TerrianGeneration : MonoBehaviour
             }
         }
 
-        // 扩散较亮区域的亮光
+        // 扩散较亮区域的亮光来照亮unlitBlocks
         foreach (Vector2Int source in toRelight)
         {
             LightBlock(source.x, source.y, worldTilesMap.GetPixel(source.x, source.y).r, 0);
@@ -610,13 +769,14 @@ public class TerrianGeneration : MonoBehaviour
      * (x, y)：位置
      * (ix, iy)：initial 位置 
      * 
-     * 灭光函数，以输入点为中心，光半径内变黑并调用点光函数重新渲染
+     * 灭光函数，以输入点为中心，光半径内变黑并记录为unlitBlocks
      */
     void UnLightBlock(int x, int y, int ix, int iy)
     {
         if (Mathf.Abs(x - ix) >= lightRadius || Mathf.Abs(y - iy) >= lightRadius || unlitBlocks.Contains(new Vector2Int(x, y)))
             return;
-        
+
+        // 周围亮度低于中心的,移除光照并记录
         for (int nx = x - 1; nx < x + 2; nx++)
         {
             for (int ny = y - 1; ny < y + 2; ny++)
@@ -625,7 +785,7 @@ public class TerrianGeneration : MonoBehaviour
                 {
                     if (worldTilesMap.GetPixel(nx, ny) != null)
                     {
-                        if (worldTilesMap.GetPixel(nx, ny).r < worldTilesMap.GetPixel(x, y).r) // 周围亮度低于
+                        if (worldTilesMap.GetPixel(nx, ny).r < worldTilesMap.GetPixel(x, y).r)
                             UnLightBlock(nx, ny, ix, iy);
                     }
                 }
@@ -635,5 +795,4 @@ public class TerrianGeneration : MonoBehaviour
         worldTilesMap.SetPixel(x, y, Color.black);
         unlitBlocks.Add(new Vector2Int(x, y));
     }
-
 }
