@@ -65,7 +65,7 @@ public class TerrianGeneration : MonoBehaviour
         // 光照变量初始化
         worldTilesMap = new Texture2D(worldSize, worldSize)
         {
-            filterMode = FilterMode.Point
+            filterMode = FilterMode.Bilinear
         };
         lightShader.SetTexture("_ShadowTex", worldTilesMap);
 
@@ -130,7 +130,7 @@ public class TerrianGeneration : MonoBehaviour
     {
         for (int i = 0; i < worldChunks.Length; i++)
         {
-            if (Vector2.Distance(new Vector2((i * chunkSize) + (chunkSize / 2), 0), 
+            if (Vector2.Distance(new Vector2((i * chunkSize) + (chunkSize / 2), 0),
                     new Vector2(player.transform.position.x, 0)) > Camera.main.orthographicSize * 6f)
                 worldChunks[i].SetActive(false);
             else
@@ -439,8 +439,8 @@ public class TerrianGeneration : MonoBehaviour
             {
                 if (!GetTileFromWorld(x, y))
                 {
-                    RemoveLightSource(x, y);
                     PlaceTile(tile, x, y, isNaturallyPlaced);
+                    RemoveLightSource(x, y);
                 }
             }
             else
@@ -452,15 +452,15 @@ public class TerrianGeneration : MonoBehaviour
                     // 当前位置有背景tile类覆盖在上面
                     if (!GetTileFromWorld(x, y))
                     {
-                        RemoveLightSource(x, y);
                         PlaceTile(tile, x, y, isNaturallyPlaced);
+                        RemoveLightSource(x, y);
                     }
                     else
                     {
                         if (GetTileFromWorld(x, y).isBackground)
                         {
-                            RemoveLightSource(x, y);
                             PlaceTile(tile, x, y, isNaturallyPlaced);
+                            RemoveLightSource(x, y);
                         }
                     }
                 }
@@ -573,8 +573,8 @@ public class TerrianGeneration : MonoBehaviour
             // 自然生成方块被破坏,将背景变体放置在当前坐标
             if (currentTileClass.wallVariant != null && currentTileClass.naturallyPlaced)
             {
-                RemoveLightSource(x, y);
                 PlaceTile(currentTileClass.wallVariant, x, y, true);
+                RemoveLightSource(x, y);
             }
 
             // 此处无任何方块,认为是光源
@@ -583,8 +583,8 @@ public class TerrianGeneration : MonoBehaviour
             {
                 worldTilesMap.SetPixel(x, y, Color.white);
                 LightBlock(x, y, 1f, 0);
-                worldTilesMap.Apply();
             }
+            worldTilesMap.Apply();
         }
     }
 
@@ -773,7 +773,10 @@ public class TerrianGeneration : MonoBehaviour
      */
     void UnLightBlock(int x, int y, int ix, int iy)
     {
-        if (Mathf.Abs(x - ix) >= lightRadius || Mathf.Abs(y - iy) >= lightRadius || unlitBlocks.Contains(new Vector2Int(x, y)))
+        if (x < 0 || x >= worldSize || y < 0 || y >= worldSize)
+            return;
+
+        if (Vector2.Distance(new Vector2(x, y), new Vector2(ix, iy)) >= lightRadius || unlitBlocks.Contains(new Vector2Int(x, y)))
             return;
 
         // 周围亮度低于中心的,移除光照并记录
